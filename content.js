@@ -2,6 +2,8 @@
   const INSTALL_FLAG = "__CGPTX_SIDEBAR_INSTALLED__";
   const UI_KEY = "cgptx-ui";
   const FAVORITES_KEY = "cgptx-favorites";
+  const SAVE_PREFS_KEY = "cgptx-save-preferences";
+  const SAVED_CHATS_KEY = "cgptx-saved-chats";
   const DEFAULT_PANEL_TOP = 76;
   const DEFAULT_PANEL_RIGHT = 16;
   const DEFAULT_PANEL_WIDTH = 360;
@@ -38,8 +40,13 @@
     path: location.pathname,
     query: "",
     refreshTimer: null,
+    saveEnabled: false,
+    saveTimer: null,
+    savedChats: {},
+    savedDetailKey: null,
     scrollTimer: null,
     suppressOpenClick: false,
+    view: "current",
     uiOpen: true
   };
 
@@ -53,6 +60,7 @@
     bindEvents();
     await loadUiState();
     await loadFavorites();
+    await loadSavedState();
     syncUi();
     refreshMessages();
     observeConversation();
@@ -105,6 +113,15 @@
           <button type="button" class="cgptx-filter-btn" data-filter="favorites">收藏</button>
         </div>
 
+        <div class="cgptx-storage-bar">
+          <label class="cgptx-save-toggle">
+            <input type="checkbox" data-role="save-toggle" />
+            <span class="cgptx-save-switch" aria-hidden="true"></span>
+            <span data-role="save-label">保存本会话</span>
+          </label>
+          <button type="button" class="cgptx-storage-link" data-action="toggle-saved-view">本地记录</button>
+        </div>
+
         <div class="cgptx-meta">
           <span data-role="count-label">正在读取消息...</span>
           <div class="cgptx-meta-side">
@@ -143,6 +160,9 @@
     elements.countLabel = shadowRoot.querySelector('[data-role="count-label"]');
     elements.conversationLabel = shadowRoot.querySelector('[data-role="conversation-label"]');
     elements.exportButtons = Array.from(shadowRoot.querySelectorAll(".cgptx-export-btn"));
+    elements.saveToggle = shadowRoot.querySelector('[data-role="save-toggle"]');
+    elements.saveLabel = shadowRoot.querySelector('[data-role="save-label"]');
+    elements.savedViewButton = shadowRoot.querySelector('[data-action="toggle-saved-view"]');
     elements.list = shadowRoot.querySelector('[data-role="message-list"]');
     elements.filters = Array.from(shadowRoot.querySelectorAll(".cgptx-filter-btn"));
   }
@@ -181,7 +201,32 @@
         renderList();
         syncUi();
         void saveUiState();
-        scheduleSearchHighlightUpdate();
+        if (state.view === "current") {
+          scheduleSearchHighlightUpdate();
+        } else {
+          withObserverPaused(clearSearchHighlights);
+        }
+        return;
+      }
+
+      if (action === "toggle-saved-view") {
+        state.view = state.view === "saved" ? "current" : "saved";
+        state.savedDetailKey = null;
+        renderList();
+        syncUi();
+        void saveUiState();
+        if (state.view === "current") {
+          scheduleSearchHighlightUpdate();
+        } else {
+          withObserverPaused(clearSearchHighlights);
+        }
+        return;
+      }
+
+      if (action === "back-saved-list") {
+        state.savedDetailKey = null;
+        renderList();
+        syncUi();
         return;
       }
 
@@ -195,11 +240,29 @@
         return;
       }
 
+      if (action === "view-saved-chat") {
+        state.view = "saved";
+        state.savedDetailKey = target.dataset.savedKey || null;
+        renderList();
+        syncUi();
+        return;
+      }
+
+      if (action === "delete-saved-chat") {
+        event.preventDefault();
+        event.stopPropagation();
+        void deleteSavedChat(target.dataset.savedKey);
+        return;
+      }
+
       if (filter) {
+        state.view = "current";
+        state.savedDetailKey = null;
         state.filter = filter;
         renderList();
         syncUi();
         void saveUiState();
+        scheduleSearchHighlightUpdate();
         return;
       }
 
@@ -220,7 +283,15 @@
       renderList();
       syncUi();
       void saveUiState();
-      scheduleSearchHighlightUpdate();
+      if (state.view === "current") {
+        scheduleSearchHighlightUpdate();
+      } else {
+        withObserverPaused(clearSearchHighlights);
+      }
+    });
+
+    elements.saveToggle.addEventListener("change", (event) => {
+      void setSaveEnabled(event.target.checked);
     });
 
     elements.resizer.addEventListener("pointerdown", startResize);
@@ -455,7 +526,8 @@
         state.path = location.pathname;
         state.conversationKey = getConversationKey();
         state.activeId = null;
-        void loadFavorites().then(() => {
+        state.savedDetailKey = null;
+        void Promise.all([loadFavorites(), loadSavedState()]).then(() => {
           refreshMessages();
           syncUi();
         });
@@ -472,6 +544,7 @@
     syncUi();
     syncInlineFavoriteButtons();
     applySearchHighlights();
+    scheduleSaveCurrentChat();
     updateActiveFromViewport();
   }
 
@@ -560,6 +633,11 @@
       return;
     }
 
+    if (state.view === "saved") {
+      renderSavedView();
+      return;
+    }
+
     const scrollTop = elements.list.parentElement?.scrollTop ?? 0;
     const visibleMessages = getFilteredMessages();
 
@@ -630,6 +708,89 @@
     syncUi();
   }
 
+  function renderSavedView() {
+    const records = getFilteredSavedChats();
+
+    if (state.savedDetailKey) {
+      const record = state.savedChats[state.savedDetailKey];
+      if (!record) {
+        state.savedDetailKey = null;
+        renderSavedView();
+        return;
+      }
+
+      elements.list.innerHTML = `
+        <div class="cgptx-saved-detail-head">
+          <button type="button" class="cgptx-saved-back" data-action="back-saved-list">返回本地记录</button>
+          <button
+            type="button"
+            class="cgptx-saved-delete"
+            data-action="delete-saved-chat"
+            data-saved-key="${escapeHtml(record.conversationKey)}"
+          >删除</button>
+        </div>
+        <article class="cgptx-saved-detail-meta">
+          <strong>${escapeHtml(record.title)}</strong>
+          <span>${escapeHtml(formatSavedTime(record.updatedAt))} · ${record.messageCount || 0} 条消息</span>
+        </article>
+        ${(record.messages || [])
+          .map(
+            (message) => `
+              <article class="cgptx-saved-message">
+                <div class="cgptx-item-head">
+                  <span class="cgptx-item-index">#${message.index}</span>
+                  <span class="cgptx-item-role" data-role="${message.role}">${escapeHtml(ROLE_LABELS[message.role] || message.role)}</span>
+                </div>
+                <div class="cgptx-saved-message-text">${renderSavedText(message.text)}</div>
+              </article>
+            `
+          )
+          .join("")}
+      `;
+      return;
+    }
+
+    if (!records.length) {
+      const hasAnySaved = Object.keys(state.savedChats).length > 0;
+      elements.list.innerHTML = `
+        <div class="cgptx-empty">
+          <div class="cgptx-empty-title">${hasAnySaved ? "没有匹配的本地记录" : "还没有本地聊天记录"}</div>
+          <div class="cgptx-empty-text">${hasAnySaved ? "换个关键词再试。" : "打开“保存本会话”后，当前会话会保存到本地。"}</div>
+        </div>
+      `;
+      return;
+    }
+
+    elements.list.innerHTML = records
+      .map(
+        (record) => `
+          <article class="cgptx-saved-chat">
+            <button
+              type="button"
+              class="cgptx-saved-chat-main"
+              data-action="view-saved-chat"
+              data-saved-key="${escapeHtml(record.conversationKey)}"
+            >
+              <div class="cgptx-saved-chat-head">
+                <strong>${escapeHtml(record.title)}</strong>
+                <span>${escapeHtml(formatSavedTime(record.updatedAt))}</span>
+              </div>
+              <div class="cgptx-saved-chat-text">${escapeHtml(record.snippet || "无内容预览")}</div>
+              <div class="cgptx-saved-chat-foot">${record.messageCount || 0} 条消息</div>
+            </button>
+            <button
+              type="button"
+              class="cgptx-saved-delete"
+              data-action="delete-saved-chat"
+              data-saved-key="${escapeHtml(record.conversationKey)}"
+              title="删除本地记录"
+            >删除</button>
+          </article>
+        `
+      )
+      .join("");
+  }
+
   function syncUi() {
     if (elements.panel) {
       const panelWidth = clampPanelWidth(state.panelWidth);
@@ -654,27 +815,46 @@
       elements.searchInput.value = state.query;
     }
     if (elements.countLabel) {
-      const visibleCount = getFilteredMessages().length;
-      elements.countLabel.textContent = state.messages.length
-        ? `显示 ${visibleCount} / ${state.messages.length} 条消息`
-        : "等待聊天内容出现";
+      if (state.view === "saved") {
+        const totalSaved = Object.keys(state.savedChats).length;
+        const visibleSaved = getFilteredSavedChats().length;
+        elements.countLabel.textContent = state.savedDetailKey
+          ? "查看本地记录"
+          : `本地记录 ${visibleSaved} / ${totalSaved}`;
+      } else {
+        const visibleCount = getFilteredMessages().length;
+        elements.countLabel.textContent = state.messages.length
+          ? `显示 ${visibleCount} / ${state.messages.length} 条消息`
+          : "等待聊天内容出现";
+      }
     }
     if (elements.conversationLabel) {
-      elements.conversationLabel.textContent = simplifyConversationKey(state.conversationKey);
+      elements.conversationLabel.textContent = state.view === "saved" ? "本地查看" : simplifyConversationKey(state.conversationKey);
     }
     if (elements.filters) {
       elements.filters.forEach((button) => {
-        button.dataset.active = String(button.dataset.filter === state.filter);
+        button.dataset.active = String(state.view === "current" && button.dataset.filter === state.filter);
       });
     }
     if (elements.favoritesTools) {
       const favoriteCount = state.messages.filter((message) => state.favorites.has(message.id)).length;
-      const showFavoriteTools = state.filter === "favorites";
+      const showFavoriteTools = state.view === "current" && state.filter === "favorites";
       elements.favoritesTools.dataset.open = String(showFavoriteTools);
       elements.exportButtons.forEach((button) => {
         button.disabled = favoriteCount === 0;
         button.title = favoriteCount === 0 ? "当前没有可导出的收藏消息" : button.textContent;
       });
+    }
+    if (elements.saveToggle) {
+      elements.saveToggle.checked = state.saveEnabled;
+      elements.saveToggle.disabled = state.view === "saved";
+    }
+    if (elements.saveLabel) {
+      elements.saveLabel.textContent = state.saveEnabled ? "已保存本会话" : "保存本会话";
+    }
+    if (elements.savedViewButton) {
+      elements.savedViewButton.textContent = state.view === "saved" ? "当前会话" : "本地记录";
+      elements.savedViewButton.dataset.active = String(state.view === "saved");
     }
   }
 
@@ -752,6 +932,112 @@
     renderList();
     syncUi();
     syncInlineFavoriteButtons();
+  }
+
+  async function setSaveEnabled(nextEnabled) {
+    state.saveEnabled = nextEnabled;
+    await saveSavePreference();
+
+    if (state.saveEnabled) {
+      await saveCurrentChatSnapshot();
+    } else {
+      delete state.savedChats[state.conversationKey];
+      await saveSavedChats();
+    }
+
+    renderList();
+    syncUi();
+  }
+
+  function scheduleSaveCurrentChat() {
+    if (!state.saveEnabled || !state.messages.length) {
+      return;
+    }
+
+    window.clearTimeout(state.saveTimer);
+    state.saveTimer = window.setTimeout(() => {
+      void saveCurrentChatSnapshot();
+    }, 500);
+  }
+
+  async function saveCurrentChatSnapshot() {
+    if (!state.saveEnabled || !state.messages.length) {
+      return;
+    }
+
+    const snapshot = buildCurrentChatSnapshot();
+    state.savedChats[state.conversationKey] = snapshot;
+    await saveSavedChats();
+    syncUi();
+  }
+
+  function buildCurrentChatSnapshot() {
+    const messages = state.messages.map((message) => ({
+      id: message.id,
+      index: message.index,
+      role: message.role,
+      text: message.rawText
+    }));
+
+    const firstUserMessage = state.messages.find((message) => message.role === "user");
+    const titleSource = firstUserMessage?.text || document.title || simplifyConversationKey(state.conversationKey);
+    const title = titleSource.length > 48 ? `${titleSource.slice(0, 48)}...` : titleSource;
+    const snippetSource = messages.find((message) => message.text)?.text || "";
+    const snippet = normalizeText(snippetSource).slice(0, 140);
+
+    return {
+      conversationKey: state.conversationKey,
+      messageCount: messages.length,
+      messages,
+      savedAt: state.savedChats[state.conversationKey]?.savedAt || new Date().toISOString(),
+      snippet,
+      title,
+      updatedAt: new Date().toISOString(),
+      url: location.href
+    };
+  }
+
+  function getFilteredSavedChats() {
+    const query = state.query.toLowerCase();
+
+    return Object.values(state.savedChats)
+      .filter((record) => {
+        if (!query) {
+          return true;
+        }
+
+        const haystack = [
+          record.title,
+          record.snippet,
+          ...(Array.isArray(record.messages) ? record.messages.map((message) => message.text) : [])
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        return haystack.includes(query);
+      })
+      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+  }
+
+  async function deleteSavedChat(conversationKey) {
+    if (!conversationKey || !state.savedChats[conversationKey]) {
+      return;
+    }
+
+    delete state.savedChats[conversationKey];
+
+    if (conversationKey === state.conversationKey) {
+      state.saveEnabled = false;
+      await saveSavePreference();
+    }
+
+    if (state.savedDetailKey === conversationKey) {
+      state.savedDetailKey = null;
+    }
+
+    await saveSavedChats();
+    renderList();
+    syncUi();
   }
 
   function syncInlineFavoriteButtons() {
@@ -941,6 +1227,18 @@
     return html;
   }
 
+  function renderSavedText(text) {
+    return escapeHtml(text || "").replace(/\n/g, "<br>");
+  }
+
+  function formatSavedTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "未知时间";
+    }
+    return date.toLocaleString();
+  }
+
   async function loadUiState() {
     const stored = await storageGet(UI_KEY);
     const uiState = stored?.[UI_KEY];
@@ -952,6 +1250,7 @@
     state.panelRight = typeof uiState.panelRight === "number" ? uiState.panelRight : DEFAULT_PANEL_RIGHT;
     state.panelTop = typeof uiState.panelTop === "number" ? uiState.panelTop : DEFAULT_PANEL_TOP;
     state.query = typeof uiState.query === "string" ? uiState.query : "";
+    state.view = ["current", "saved"].includes(uiState.view) ? uiState.view : "current";
     state.uiOpen = typeof uiState.uiOpen === "boolean" ? uiState.uiOpen : true;
     state.panelWidth = clampPanelWidth(typeof uiState.panelWidth === "number" ? uiState.panelWidth : DEFAULT_PANEL_WIDTH);
     const position = clampPanelPosition(state.panelTop, state.panelRight, state.panelWidth);
@@ -967,6 +1266,7 @@
         panelTop: state.panelTop,
         panelWidth: clampPanelWidth(state.panelWidth),
         query: state.query,
+        view: state.view,
         uiOpen: state.uiOpen
       }
     });
@@ -985,6 +1285,34 @@
     allFavorites[state.conversationKey] = Array.from(state.favorites);
     await storageSet({
       [FAVORITES_KEY]: allFavorites
+    });
+  }
+
+  async function loadSavedState() {
+    const stored = await storageGet([SAVE_PREFS_KEY, SAVED_CHATS_KEY]);
+    const savePrefs = stored?.[SAVE_PREFS_KEY] || {};
+    state.savedChats = stored?.[SAVED_CHATS_KEY] || {};
+    state.saveEnabled = Boolean(savePrefs[state.conversationKey]);
+  }
+
+  async function saveSavePreference() {
+    const stored = await storageGet(SAVE_PREFS_KEY);
+    const savePrefs = stored?.[SAVE_PREFS_KEY] || {};
+
+    if (state.saveEnabled) {
+      savePrefs[state.conversationKey] = true;
+    } else {
+      delete savePrefs[state.conversationKey];
+    }
+
+    await storageSet({
+      [SAVE_PREFS_KEY]: savePrefs
+    });
+  }
+
+  function saveSavedChats() {
+    return storageSet({
+      [SAVED_CHATS_KEY]: state.savedChats
     });
   }
 
