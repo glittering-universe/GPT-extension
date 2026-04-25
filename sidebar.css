@@ -569,7 +569,8 @@
 }
 
 .cgptx-saved-delete,
-.cgptx-saved-back {
+.cgptx-saved-back,
+.cgptx-saved-open {
   appearance: none;
   border: 0;
   border-radius: 999px;
@@ -591,10 +592,22 @@
   gap: 12px;
 }
 
+.cgptx-saved-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .cgptx-saved-back {
   background: #0f172a;
   color: #ffffff;
   padding: 10px 12px;
+}
+
+.cgptx-saved-open {
+  background: rgba(219, 234, 254, 0.96);
+  color: #1d4ed8;
+  padding: 9px 10px;
 }
 
 .cgptx-saved-detail-meta {
@@ -607,6 +620,12 @@
 .cgptx-saved-detail-meta strong {
   color: #0f172a;
   font: 700 14px/1.35 "SF Pro Display", "PingFang SC", "Segoe UI", sans-serif;
+}
+
+.cgptx-saved-reader-hint {
+  color: #64748b;
+  font: 500 12px/1.55 "SF Pro Display", "PingFang SC", "Segoe UI", sans-serif;
+  padding: 0 4px;
 }
 
 .cgptx-saved-message {

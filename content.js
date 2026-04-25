@@ -230,6 +230,11 @@
         return;
       }
 
+      if (action === "open-saved-viewer") {
+        openSavedChatViewer(target.dataset.savedKey);
+        return;
+      }
+
       if (action === "export-md") {
         exportFavorites("md");
         return;
@@ -243,6 +248,7 @@
       if (action === "view-saved-chat") {
         state.view = "saved";
         state.savedDetailKey = target.dataset.savedKey || null;
+        openSavedChatViewer(state.savedDetailKey);
         renderList();
         syncUi();
         return;
@@ -301,6 +307,14 @@
     document.addEventListener(
       "click",
       (event) => {
+        const viewerAction = event.target.closest("[data-cgptx-viewer-action]");
+        if (viewerAction) {
+          event.preventDefault();
+          event.stopPropagation();
+          closeSavedChatViewer();
+          return;
+        }
+
         const target = event.target.closest("[data-cgptx-inline-favorite]");
         if (!target) {
           return;
@@ -322,6 +336,11 @@
     );
 
     window.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && document.getElementById("cgptx-saved-reader")) {
+        closeSavedChatViewer();
+        return;
+      }
+
       if (!matchesHotkey(event) || isEditableTarget(event.target)) {
         return;
       }
@@ -722,17 +741,26 @@
       elements.list.innerHTML = `
         <div class="cgptx-saved-detail-head">
           <button type="button" class="cgptx-saved-back" data-action="back-saved-list">返回本地记录</button>
-          <button
-            type="button"
-            class="cgptx-saved-delete"
-            data-action="delete-saved-chat"
-            data-saved-key="${escapeHtml(record.conversationKey)}"
-          >删除</button>
+          <div class="cgptx-saved-detail-actions">
+            <button
+              type="button"
+              class="cgptx-saved-open"
+              data-action="open-saved-viewer"
+              data-saved-key="${escapeHtml(record.conversationKey)}"
+            >加载到页面</button>
+            <button
+              type="button"
+              class="cgptx-saved-delete"
+              data-action="delete-saved-chat"
+              data-saved-key="${escapeHtml(record.conversationKey)}"
+            >删除</button>
+          </div>
         </div>
         <article class="cgptx-saved-detail-meta">
           <strong>${escapeHtml(record.title)}</strong>
           <span>${escapeHtml(formatSavedTime(record.updatedAt))} · ${record.messageCount || 0} 条消息</span>
         </article>
+        <div class="cgptx-saved-reader-hint">已保存会话会按原网页聊天布局在页面中重新加载。</div>
         ${(record.messages || [])
           .map(
             (message) => `
@@ -788,6 +816,87 @@
           </article>
         `
       )
+      .join("");
+  }
+
+  function openSavedChatViewer(conversationKey) {
+    const record = state.savedChats[conversationKey];
+    if (!record) {
+      return;
+    }
+
+    withObserverPaused(() => {
+      closeSavedChatViewer();
+
+      const reader = document.createElement("section");
+      reader.id = "cgptx-saved-reader";
+      reader.setAttribute("aria-label", "本地聊天记录");
+      reader.innerHTML = `
+        <div class="cgptx-reader-shell">
+          <header class="cgptx-reader-header">
+            <div>
+              <strong>${escapeHtml(record.title || "本地聊天记录")}</strong>
+              <span>${escapeHtml(formatSavedTime(record.updatedAt))} · ${record.messageCount || 0} 条消息</span>
+            </div>
+            <button type="button" data-cgptx-viewer-action="close" aria-label="关闭本地聊天记录">关闭</button>
+          </header>
+          <main class="cgptx-reader-main">
+            ${(record.messages || []).map(renderSavedViewerMessage).join("")}
+          </main>
+        </div>
+      `;
+
+      document.body.appendChild(reader);
+    });
+  }
+
+  function closeSavedChatViewer() {
+    const reader = document.getElementById("cgptx-saved-reader");
+    if (reader) {
+      reader.remove();
+    }
+  }
+
+  function renderSavedViewerMessage(message) {
+    const role = message.role === "user" ? "user" : "assistant";
+    const roleLabel = ROLE_LABELS[role] || role;
+
+    return `
+      <article class="cgptx-reader-message" data-role="${role}">
+        <div class="cgptx-reader-avatar" aria-hidden="true">${role === "user" ? "你" : "AI"}</div>
+        <div class="cgptx-reader-content">
+          <div class="cgptx-reader-role">${escapeHtml(roleLabel)} · #${message.index}</div>
+          <div class="cgptx-reader-text">${renderSavedChatContent(message.text || "")}</div>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderSavedChatContent(text) {
+    const value = String(text || "");
+    const codePattern = /```([\w-]*)\n?([\s\S]*?)```/g;
+    let cursor = 0;
+    let html = "";
+    let match = codePattern.exec(value);
+
+    while (match) {
+      html += renderSavedPlainText(value.slice(cursor, match.index));
+      const language = match[1] ? `<div class="cgptx-reader-code-lang">${escapeHtml(match[1])}</div>` : "";
+      html += `<pre class="cgptx-reader-code">${language}<code>${escapeHtml(match[2].trim())}</code></pre>`;
+      cursor = match.index + match[0].length;
+      match = codePattern.exec(value);
+    }
+
+    html += renderSavedPlainText(value.slice(cursor));
+    return html || "<p></p>";
+  }
+
+  function renderSavedPlainText(text) {
+    return text
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean)
+      .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
       .join("");
   }
 
@@ -1490,6 +1599,191 @@
         color: inherit;
         border-radius: 4px;
         padding: 0 2px;
+      }
+
+      #cgptx-saved-reader {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483645;
+        background: rgba(255, 255, 255, 0.98);
+        color: #0f172a;
+        font-family: "SF Pro Display", "PingFang SC", "Segoe UI", sans-serif;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-shell {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 66px;
+        padding: 12px 24px;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+        background: rgba(255, 255, 255, 0.94);
+        backdrop-filter: blur(14px);
+      }
+
+      #cgptx-saved-reader .cgptx-reader-header div {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-header strong {
+        overflow: hidden;
+        color: #0f172a;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-header span {
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1.35;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-header button {
+        appearance: none;
+        border: 0;
+        border-radius: 999px;
+        background: #0f172a;
+        color: #ffffff;
+        cursor: pointer;
+        font: 600 13px/1 "SF Pro Display", "PingFang SC", "Segoe UI", sans-serif;
+        padding: 11px 14px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-main {
+        flex: 1;
+        overflow-y: auto;
+        padding: 36px max(24px, calc((100vw - 820px) / 2)) 64px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-message {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 14px;
+        margin: 0 auto 28px;
+        max-width: 820px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-message[data-role="user"] {
+        grid-template-columns: minmax(0, 1fr) 34px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-message[data-role="user"] .cgptx-reader-avatar {
+        grid-column: 2;
+        grid-row: 1;
+        background: #0f172a;
+        color: #ffffff;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-message[data-role="user"] .cgptx-reader-content {
+        grid-column: 1;
+        grid-row: 1;
+        justify-self: end;
+        max-width: min(680px, 100%);
+        border-radius: 18px;
+        background: #f1f5f9;
+        padding: 14px 16px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 34px;
+        height: 34px;
+        border-radius: 999px;
+        background: #e2e8f0;
+        color: #334155;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-content {
+        min-width: 0;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-role {
+        margin-bottom: 8px;
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.4;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-text {
+        color: #1e293b;
+        font-size: 15px;
+        font-weight: 500;
+        line-height: 1.72;
+        word-break: break-word;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-text p {
+        margin: 0 0 12px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-text p:last-child {
+        margin-bottom: 0;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-code {
+        margin: 14px 0;
+        overflow-x: auto;
+        border-radius: 10px;
+        background: #111827;
+        color: #e5e7eb;
+        font: 500 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        padding: 14px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-code-lang {
+        margin: -2px 0 8px;
+        color: #94a3b8;
+        font: 700 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        text-transform: uppercase;
+      }
+
+      @media (max-width: 720px) {
+        #cgptx-saved-reader .cgptx-reader-header {
+          padding: 10px 14px;
+        }
+
+        #cgptx-saved-reader .cgptx-reader-main {
+          padding: 24px 14px 48px;
+        }
+
+        #cgptx-saved-reader .cgptx-reader-message,
+        #cgptx-saved-reader .cgptx-reader-message[data-role="user"] {
+          grid-template-columns: 30px minmax(0, 1fr);
+          gap: 10px;
+        }
+
+        #cgptx-saved-reader .cgptx-reader-message[data-role="user"] .cgptx-reader-avatar {
+          grid-column: 1;
+        }
+
+        #cgptx-saved-reader .cgptx-reader-message[data-role="user"] .cgptx-reader-content {
+          grid-column: 2;
+          justify-self: stretch;
+        }
+
+        #cgptx-saved-reader .cgptx-reader-avatar {
+          width: 30px;
+          height: 30px;
+        }
       }
     `;
     document.head.appendChild(style);
