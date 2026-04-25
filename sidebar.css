@@ -638,6 +638,48 @@
   word-break: break-word;
 }
 
+.cgptx-saved-html :where(p, ul, ol, blockquote, pre, table) {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+.cgptx-saved-html :where(ul, ol) {
+  padding-left: 20px;
+}
+
+.cgptx-saved-html code:not(pre code) {
+  border-radius: 5px;
+  background: #f1f5f9;
+  color: #0f172a;
+  font: 600 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  padding: 2px 5px;
+}
+
+.cgptx-saved-html pre {
+  overflow-x: auto;
+  border-radius: 10px;
+  background: #111827;
+  color: #e5e7eb;
+  font: 500 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  padding: 12px;
+}
+
+.cgptx-saved-html table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.cgptx-saved-html :where(th, td) {
+  border: 1px solid #cbd5e1;
+  padding: 6px 8px;
+}
+
+.cgptx-saved-html img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
 @media (max-width: 1280px) {
   .cgptx-panel {
     width: 320px;

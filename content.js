@@ -598,6 +598,7 @@
       node.setAttribute("data-cgptx-turn-id", id);
 
       messages.push({
+        html: extractHtml(node),
         id,
         index,
         node,
@@ -613,10 +614,43 @@
 
   function extractText(node) {
     const clone = node.cloneNode(true);
-    clone
-      .querySelectorAll("button, svg, textarea, input, nav, [data-cgptx-inline-favorite-wrap]")
-      .forEach((element) => element.remove());
+    sanitizeMessageClone(clone);
     return clone.textContent || "";
+  }
+
+  function extractHtml(node) {
+    const clone = node.cloneNode(true);
+    sanitizeMessageClone(clone);
+    return clone.outerHTML || clone.innerHTML || "";
+  }
+
+  function sanitizeMessageClone(root) {
+    root.querySelectorAll('[data-cgptx-search-mark="true"]').forEach((mark) => {
+      mark.replaceWith(document.createTextNode(mark.textContent || ""));
+    });
+
+    root
+      .querySelectorAll("script, style, button, textarea, input, nav, svg, [data-cgptx-inline-favorite-wrap]")
+      .forEach((element) => element.remove());
+
+    const elements = root.nodeType === Node.ELEMENT_NODE ? [root, ...root.querySelectorAll("*")] : Array.from(root.querySelectorAll("*"));
+
+    elements.forEach((element) => {
+      Array.from(element.attributes).forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        const value = attribute.value.trim().toLowerCase();
+
+        if (
+          name === "id" ||
+          name === "contenteditable" ||
+          name.startsWith("on") ||
+          name.startsWith("data-cgptx") ||
+          (["href", "src"].includes(name) && value.startsWith("javascript:"))
+        ) {
+          element.removeAttribute(attribute.name);
+        }
+      });
+    });
   }
 
   function normalizeText(value) {
@@ -769,7 +803,7 @@
                   <span class="cgptx-item-index">#${message.index}</span>
                   <span class="cgptx-item-role" data-role="${message.role}">${escapeHtml(ROLE_LABELS[message.role] || message.role)}</span>
                 </div>
-                <div class="cgptx-saved-message-text">${renderSavedText(message.text)}</div>
+                <div class="cgptx-saved-message-text">${renderSavedMessageBody(message)}</div>
               </article>
             `
           )
@@ -861,15 +895,38 @@
     const role = message.role === "user" ? "user" : "assistant";
     const roleLabel = ROLE_LABELS[role] || role;
 
+    if (message.html) {
+      return `
+        <article class="cgptx-reader-native-message" data-role="${role}">
+          ${sanitizeSavedHtml(message.html)}
+        </article>
+      `;
+    }
+
     return `
       <article class="cgptx-reader-message" data-role="${role}">
         <div class="cgptx-reader-avatar" aria-hidden="true">${role === "user" ? "你" : "AI"}</div>
         <div class="cgptx-reader-content">
           <div class="cgptx-reader-role">${escapeHtml(roleLabel)} · #${message.index}</div>
-          <div class="cgptx-reader-text">${renderSavedChatContent(message.text || "")}</div>
+          <div class="cgptx-reader-text">${renderSavedMessageBody(message)}</div>
         </div>
       </article>
     `;
+  }
+
+  function renderSavedMessageBody(message) {
+    if (message?.html) {
+      return `<div class="cgptx-saved-html">${sanitizeSavedHtml(message.html)}</div>`;
+    }
+
+    return renderSavedChatContent(message?.text || "");
+  }
+
+  function sanitizeSavedHtml(html) {
+    const template = document.createElement("template");
+    template.innerHTML = String(html || "");
+    sanitizeMessageClone(template.content);
+    return template.innerHTML;
   }
 
   function renderSavedChatContent(text) {
@@ -1082,6 +1139,7 @@
 
   function buildCurrentChatSnapshot() {
     const messages = state.messages.map((message) => ({
+      html: message.html,
       id: message.id,
       index: message.index,
       role: message.role,
@@ -1096,6 +1154,7 @@
 
     return {
       conversationKey: state.conversationKey,
+      formatVersion: 2,
       messageCount: messages.length,
       messages,
       savedAt: state.savedChats[state.conversationKey]?.savedAt || new Date().toISOString(),
@@ -1677,6 +1736,28 @@
         max-width: 820px;
       }
 
+      #cgptx-saved-reader .cgptx-reader-native-message {
+        margin: 0 auto 28px;
+        max-width: 820px;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-native-message[data-role="user"] {
+        display: flex;
+        justify-content: flex-end;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-native-message[data-role="assistant"] {
+        display: block;
+      }
+
+      #cgptx-saved-reader .cgptx-reader-native-message [data-message-author-role="user"] {
+        max-width: min(680px, 100%);
+      }
+
+      #cgptx-saved-reader .cgptx-reader-native-message [data-message-author-role="assistant"] {
+        max-width: 100%;
+      }
+
       #cgptx-saved-reader .cgptx-reader-message[data-role="user"] {
         grid-template-columns: minmax(0, 1fr) 34px;
       }
@@ -1737,6 +1818,77 @@
 
       #cgptx-saved-reader .cgptx-reader-text p:last-child {
         margin-bottom: 0;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) :where(h1, h2, h3, h4, h5, h6) {
+        margin: 16px 0 8px;
+        color: #0f172a;
+        font-weight: 700;
+        line-height: 1.35;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) :where(ul, ol) {
+        margin: 10px 0 14px;
+        padding-left: 24px;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) li {
+        margin: 4px 0;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) blockquote {
+        margin: 14px 0;
+        border-left: 3px solid #cbd5e1;
+        color: #475569;
+        padding-left: 12px;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) table {
+        width: 100%;
+        margin: 14px 0;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) :where(th, td) {
+        border: 1px solid #cbd5e1;
+        padding: 8px 10px;
+        text-align: left;
+        vertical-align: top;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) th {
+        background: #f1f5f9;
+        font-weight: 700;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) code:not(pre code) {
+        border-radius: 5px;
+        background: #f1f5f9;
+        color: #0f172a;
+        font: 600 0.92em/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        padding: 2px 5px;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) pre {
+        margin: 14px 0;
+        overflow-x: auto;
+        border-radius: 10px;
+        background: #111827;
+        color: #e5e7eb;
+        font: 500 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        padding: 14px;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) pre code {
+        background: transparent;
+        color: inherit;
+        padding: 0;
+      }
+
+      #cgptx-saved-reader :where(.cgptx-saved-html, .cgptx-reader-native-message) img {
+        max-width: 100%;
+        border-radius: 10px;
       }
 
       #cgptx-saved-reader .cgptx-reader-code {
