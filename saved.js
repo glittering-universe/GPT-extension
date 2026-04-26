@@ -301,7 +301,10 @@ function renderMessageBody(message, role) {
   }
 
   if (message?.html) {
-    return `<div class="saved-html">${sanitizeSavedHtml(message.html)}</div>`;
+    const html = sanitizeSavedHtml(message.html);
+    if (hasRenderableHtml(html)) {
+      return `<div class="saved-html">${html}</div>`;
+    }
   }
 
   return `<div class="saved-text">${renderPlainText(message?.text || "")}</div>`;
@@ -367,7 +370,6 @@ function cleanSnapshotInlineStyle(element) {
     return;
   }
 
-  const isInsideCodeBlock = Boolean(element.closest("pre"));
   if (!isTextFormattingElement(element)) {
     element.removeAttribute("style");
     return;
@@ -398,7 +400,7 @@ function cleanSnapshotInlineStyle(element) {
     .filter(Boolean)
     .filter((declaration) => {
       const property = declaration.split(":")[0]?.trim().toLowerCase();
-      if (isInsideCodeBlock && property === "color") {
+      if (property === "color") {
         return false;
       }
       return allowedProperties.has(property);
@@ -415,6 +417,13 @@ function isTextFormattingElement(element) {
   return /^(a|b|blockquote|code|em|h[1-6]|i|li|ol|p|pre|s|span|strong|sub|sup|table|tbody|td|tfoot|th|thead|tr|u|ul)$/i.test(
     element.tagName
   );
+}
+
+function hasRenderableHtml(html) {
+  const template = document.createElement("template");
+  template.innerHTML = String(html || "");
+  const text = template.content.textContent?.replace(/\s+/g, "").trim();
+  return Boolean(text || template.content.querySelector("img, table, pre, code, ul, ol, blockquote"));
 }
 
 function renderPlainText(text) {

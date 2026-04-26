@@ -260,9 +260,14 @@ button {
   word-break: break-word;
 }
 
+.saved-html,
+.saved-html :where(p, span, div, section, article, main, li, ol, ul, blockquote, strong, em, b, i, td, th) {
+  color: #1e293b !important;
+}
+
 .saved-html :where(h1, h2, h3, h4, h5, h6) {
   margin: 16px 0 8px;
-  color: #0f172a;
+  color: #0f172a !important;
   font-weight: 700;
   line-height: 1.35;
 }
@@ -297,7 +302,7 @@ button {
 
 .saved-html blockquote {
   border-left: 3px solid #cbd5e1;
-  color: #475569;
+  color: #475569 !important;
   padding-left: 12px;
 }
 
@@ -353,6 +358,7 @@ button {
 }
 
 .saved-text p {
+  color: #1e293b;
   margin: 0 0 12px;
 }
 

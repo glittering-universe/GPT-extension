@@ -46,7 +46,6 @@
     "padding-right",
     "padding-bottom",
     "padding-left",
-    "color",
     "font-family",
     "font-size",
     "font-weight",
