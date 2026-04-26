@@ -23,6 +23,9 @@ GPT-extension/
 ├── content.js
 ├── manifest.json
 ├── README.md
+├── saved.css
+├── saved.html
+├── saved.js
 └── sidebar.css
 ```
 
@@ -41,7 +44,9 @@ GPT-extension/
 - 收藏数据保存在 `chrome.storage.local`
 - 收藏是按 `location.pathname` 维度隔离的
 - “保存本会话”开启后，当前会话消息会保存到 `chrome.storage.local`
-- “本地记录”可以查看已保存的聊天记录，并可加载到页面中按原聊天界面阅读
+- 本地聊天记录保存在 Chrome 扩展本地存储 `chrome.storage.local` 的 `cgptx-saved-chats` 键下，不会生成普通文件
+- “本地记录”可以查看和删除已保存的聊天记录，点击记录会在新标签页打开 `saved.html?key=...`
+- 独立本地记录页会按 ChatGPT 阅读布局重放消息，并在每条助手回复底部提供复制/反馈操作栏
 - 新保存的本地记录会同时保存纯文本、清理后的消息 HTML 和关键计算样式，用于重放标题、列表、表格、代码块等格式
 - 关闭保存或删除记录会移除对应本地快照
 - 默认快捷键是 `Alt/Option + Shift + S`
@@ -67,4 +72,4 @@ GPT-extension/
 - 用 IndexedDB 存储大量聊天记录
 - 给本地记录增加 Markdown / JSON 导出
 - 给本地记录增加按时间和标题排序
-- 给本地重载视图增加复制、全文搜索和导出
+- 给本地重载视图增加全文搜索和导出

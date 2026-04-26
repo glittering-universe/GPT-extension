@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>本地聊天记录</title>
+    <link rel="stylesheet" href="saved.css" />
+  </head>
+  <body>
+    <div id="app" class="saved-app">
+      <header class="saved-header">
+        <div>
+          <strong data-role="title">本地聊天记录</strong>
+          <span data-role="meta">正在读取本地记录...</span>
+        </div>
+        <div class="saved-header-actions">
+          <button type="button" data-action="show-list">记录列表</button>
+          <button type="button" data-action="close-tab">关闭</button>
+        </div>
+      </header>
+      <main class="saved-main" data-role="main"></main>
+    </div>
+    <script src="saved.js"></script>
+  </body>
+</html>

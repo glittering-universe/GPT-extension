@@ -21,7 +21,10 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "sidebar.css"
+        "sidebar.css",
+        "saved.html",
+        "saved.css",
+        "saved.js"
       ],
       "matches": [
         "https://chatgpt.com/*",

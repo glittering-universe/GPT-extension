@@ -306,11 +306,7 @@
       }
 
       if (action === "view-saved-chat") {
-        state.view = "saved";
-        state.savedDetailKey = target.dataset.savedKey || null;
-        openSavedChatViewer(state.savedDetailKey);
-        renderList();
-        syncUi();
+        openSavedChatViewer(target.dataset.savedKey);
         return;
       }
 
@@ -895,7 +891,7 @@
               class="cgptx-saved-open"
               data-action="open-saved-viewer"
               data-saved-key="${escapeHtml(record.conversationKey)}"
-            >加载到页面</button>
+            >新标签打开</button>
             <button
               type="button"
               class="cgptx-saved-delete"
@@ -908,7 +904,7 @@
           <strong>${escapeHtml(record.title)}</strong>
           <span>${escapeHtml(formatSavedTime(record.updatedAt))} · ${record.messageCount || 0} 条消息</span>
         </article>
-        <div class="cgptx-saved-reader-hint">已保存会话会按原网页聊天布局在页面中重新加载。</div>
+        <div class="cgptx-saved-reader-hint">已保存会话会在新标签页按 ChatGPT 阅读布局打开。</div>
         ${(record.messages || [])
           .map(
             (message) => `
@@ -968,34 +964,12 @@
   }
 
   function openSavedChatViewer(conversationKey) {
-    const record = state.savedChats[conversationKey];
-    if (!record) {
+    if (!conversationKey || !state.savedChats[conversationKey]) {
       return;
     }
 
-    withObserverPaused(() => {
-      closeSavedChatViewer();
-
-      const reader = document.createElement("section");
-      reader.id = "cgptx-saved-reader";
-      reader.setAttribute("aria-label", "本地聊天记录");
-      reader.innerHTML = `
-        <div class="cgptx-reader-shell">
-          <header class="cgptx-reader-header">
-            <div>
-              <strong>${escapeHtml(record.title || "本地聊天记录")}</strong>
-              <span>${escapeHtml(formatSavedTime(record.updatedAt))} · ${record.messageCount || 0} 条消息</span>
-            </div>
-            <button type="button" data-cgptx-viewer-action="close" aria-label="关闭本地聊天记录">关闭</button>
-          </header>
-          <main class="cgptx-reader-main">
-            ${(record.messages || []).map(renderSavedViewerMessage).join("")}
-          </main>
-        </div>
-      `;
-
-      document.body.appendChild(reader);
-    });
+    const url = chrome.runtime.getURL(`saved.html?key=${encodeURIComponent(conversationKey)}`);
+    window.open(url, "_blank", "noopener");
   }
 
   function closeSavedChatViewer() {
