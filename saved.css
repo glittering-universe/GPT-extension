@@ -331,15 +331,19 @@ button {
 .saved-code {
   overflow-x: auto;
   border-radius: 10px;
-  background: #111827;
-  color: #e5e7eb;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc !important;
+  color: #0f172a !important;
   font: 500 13px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   padding: 14px;
 }
 
-.saved-html pre code {
-  background: transparent;
-  color: inherit;
+.saved-html pre code,
+.saved-html pre code *,
+.saved-code code,
+.saved-code code * {
+  background: transparent !important;
+  color: #0f172a !important;
   padding: 0;
 }
 

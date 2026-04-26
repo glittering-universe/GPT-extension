@@ -367,6 +367,7 @@ function cleanSnapshotInlineStyle(element) {
     return;
   }
 
+  const isInsideCodeBlock = Boolean(element.closest("pre"));
   if (!isTextFormattingElement(element)) {
     element.removeAttribute("style");
     return;
@@ -397,6 +398,9 @@ function cleanSnapshotInlineStyle(element) {
     .filter(Boolean)
     .filter((declaration) => {
       const property = declaration.split(":")[0]?.trim().toLowerCase();
+      if (isInsideCodeBlock && property === "color") {
+        return false;
+      }
       return allowedProperties.has(property);
     });
 
