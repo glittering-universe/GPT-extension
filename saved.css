@@ -272,6 +272,21 @@ button {
   margin-bottom: 12px;
 }
 
+.saved-html :where(div, section, article, main) {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+.saved-html > :where(div, section, article, main) {
+  max-width: none !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
 .saved-html :where(ul, ol) {
   padding-left: 24px;
 }

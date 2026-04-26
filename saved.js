@@ -288,14 +288,18 @@ function renderMessage(conversationKey, message) {
       ${role === "assistant" ? '<div class="saved-avatar" aria-hidden="true">AI</div>' : ""}
       <div class="saved-body">
         <div class="saved-role">${escapeHtml(roleLabel)} · #${message.index}</div>
-        <div class="saved-content">${renderMessageBody(message)}</div>
+        <div class="saved-content">${renderMessageBody(message, role)}</div>
         ${actions}
       </div>
     </article>
   `;
 }
 
-function renderMessageBody(message) {
+function renderMessageBody(message, role) {
+  if (role === "user") {
+    return `<div class="saved-text">${renderPlainText(message?.text || "")}</div>`;
+  }
+
   if (message?.html) {
     return `<div class="saved-html">${sanitizeSavedHtml(message.html)}</div>`;
   }
@@ -311,7 +315,15 @@ function sanitizeSavedHtml(html) {
     .querySelectorAll("script, style, button, textarea, input, nav, svg, [data-cgptx-inline-favorite-wrap]")
     .forEach((element) => element.remove());
 
-  template.content.querySelectorAll("*").forEach((element) => {
+  const contentRoot = getSavedMessageContentRoot(template.content);
+  const output = document.createElement("div");
+  if (contentRoot) {
+    output.appendChild(contentRoot.cloneNode(true));
+  } else {
+    output.appendChild(template.content.cloneNode(true));
+  }
+
+  output.querySelectorAll("*").forEach((element) => {
     Array.from(element.attributes).forEach((attribute) => {
       const name = attribute.name.toLowerCase();
       const value = attribute.value.trim().toLowerCase();
@@ -326,9 +338,79 @@ function sanitizeSavedHtml(html) {
         element.removeAttribute(attribute.name);
       }
     });
+    cleanSnapshotInlineStyle(element);
   });
 
-  return template.innerHTML;
+  return output.innerHTML;
+}
+
+function getSavedMessageContentRoot(fragment) {
+  const selectors = [
+    '[data-message-author-role="assistant"] .markdown',
+    ".markdown",
+    '[data-message-author-role] [dir="auto"]',
+    '[data-message-author-role]'
+  ];
+
+  for (const selector of selectors) {
+    const element = fragment.querySelector(selector);
+    if (element) {
+      return element;
+    }
+  }
+
+  return fragment.firstElementChild;
+}
+
+function cleanSnapshotInlineStyle(element) {
+  if (!element.hasAttribute("style")) {
+    return;
+  }
+
+  if (!isTextFormattingElement(element)) {
+    element.removeAttribute("style");
+    return;
+  }
+
+  const allowedProperties = new Set([
+    "color",
+    "font-family",
+    "font-size",
+    "font-style",
+    "font-weight",
+    "letter-spacing",
+    "line-height",
+    "list-style-position",
+    "list-style-type",
+    "overflow-wrap",
+    "text-align",
+    "text-decoration-line",
+    "vertical-align",
+    "white-space",
+    "word-break"
+  ]);
+
+  const declarations = element
+    .getAttribute("style")
+    .split(";")
+    .map((declaration) => declaration.trim())
+    .filter(Boolean)
+    .filter((declaration) => {
+      const property = declaration.split(":")[0]?.trim().toLowerCase();
+      return allowedProperties.has(property);
+    });
+
+  if (declarations.length) {
+    element.setAttribute("style", declarations.join("; "));
+  } else {
+    element.removeAttribute("style");
+  }
+}
+
+function isTextFormattingElement(element) {
+  return /^(a|b|blockquote|code|em|h[1-6]|i|li|ol|p|pre|s|span|strong|sub|sup|table|tbody|td|tfoot|th|thead|tr|u|ul)$/i.test(
+    element.tagName
+  );
 }
 
 function renderPlainText(text) {
