@@ -872,15 +872,17 @@
   }
 
   function renderSavedView() {
-    const records = getFilteredSavedChats();
+    const entries = getFilteredSavedChatEntries();
 
     if (state.savedDetailKey) {
-      const record = state.savedChats[state.savedDetailKey];
+      const detailKey = resolveSavedChatKey(state.savedDetailKey);
+      const record = detailKey ? state.savedChats[detailKey] : null;
       if (!record) {
         state.savedDetailKey = null;
         renderSavedView();
         return;
       }
+      state.savedDetailKey = detailKey;
 
       elements.list.innerHTML = `
         <div class="cgptx-saved-detail-head">
@@ -890,18 +892,18 @@
               type="button"
               class="cgptx-saved-open"
               data-action="open-saved-viewer"
-              data-saved-key="${escapeHtml(record.conversationKey)}"
+              data-saved-key="${escapeHtml(detailKey)}"
             >新标签打开</button>
             <button
               type="button"
               class="cgptx-saved-delete"
               data-action="delete-saved-chat"
-              data-saved-key="${escapeHtml(record.conversationKey)}"
+              data-saved-key="${escapeHtml(detailKey)}"
             >删除</button>
           </div>
         </div>
         <article class="cgptx-saved-detail-meta">
-          <strong>${escapeHtml(record.title)}</strong>
+          <strong>${escapeHtml(record.title || "未命名记录")}</strong>
           <span>${escapeHtml(formatSavedTime(record.updatedAt))} · ${record.messageCount || 0} 条消息</span>
         </article>
         <div class="cgptx-saved-reader-hint">已保存会话会在新标签页按 ChatGPT 阅读布局打开。</div>
@@ -922,7 +924,7 @@
       return;
     }
 
-    if (!records.length) {
+    if (!entries.length) {
       const hasAnySaved = Object.keys(state.savedChats).length > 0;
       elements.list.innerHTML = `
         <div class="cgptx-empty">
@@ -933,18 +935,18 @@
       return;
     }
 
-    elements.list.innerHTML = records
+    elements.list.innerHTML = entries
       .map(
-        (record) => `
+        ({ key, record }) => `
           <article class="cgptx-saved-chat">
             <button
               type="button"
               class="cgptx-saved-chat-main"
               data-action="view-saved-chat"
-              data-saved-key="${escapeHtml(record.conversationKey)}"
+              data-saved-key="${escapeHtml(key)}"
             >
               <div class="cgptx-saved-chat-head">
-                <strong>${escapeHtml(record.title)}</strong>
+                <strong>${escapeHtml(record.title || "未命名记录")}</strong>
                 <span>${escapeHtml(formatSavedTime(record.updatedAt))}</span>
               </div>
               <div class="cgptx-saved-chat-text">${escapeHtml(record.snippet || "无内容预览")}</div>
@@ -954,7 +956,7 @@
               type="button"
               class="cgptx-saved-delete"
               data-action="delete-saved-chat"
-              data-saved-key="${escapeHtml(record.conversationKey)}"
+              data-saved-key="${escapeHtml(key)}"
               title="删除本地记录"
             >删除</button>
           </article>
@@ -964,11 +966,13 @@
   }
 
   function openSavedChatViewer(conversationKey) {
-    if (!conversationKey || !state.savedChats[conversationKey]) {
+    const storageKey = resolveSavedChatKey(conversationKey);
+    if (!storageKey) {
       return;
     }
 
-    const url = chrome.runtime.getURL(`saved.html?key=${encodeURIComponent(conversationKey)}`);
+    void saveSavedChats();
+    const url = chrome.runtime.getURL(`saved.html?key=${encodeURIComponent(storageKey)}`);
     window.open(url, "_blank", "noopener");
   }
 
@@ -1253,11 +1257,13 @@
     };
   }
 
-  function getFilteredSavedChats() {
+  function getFilteredSavedChatEntries() {
     const query = state.query.toLowerCase();
 
-    return Object.values(state.savedChats)
-      .filter((record) => {
+    return Object.entries(state.savedChats)
+      .filter(([, record]) => record && typeof record === "object")
+      .map(([key, record]) => ({ key, record }))
+      .filter(({ record }) => {
         if (!query) {
           return true;
         }
@@ -1272,22 +1278,69 @@
 
         return haystack.includes(query);
       })
-      .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+      .sort((left, right) => new Date(right.record.updatedAt).getTime() - new Date(left.record.updatedAt).getTime());
+  }
+
+  function resolveSavedChatKey(requestedKey) {
+    if (!requestedKey) {
+      return null;
+    }
+
+    if (state.savedChats[requestedKey]) {
+      return requestedKey;
+    }
+
+    const normalizedRequestedKey = normalizeSavedChatKey(requestedKey);
+    const entry = Object.entries(state.savedChats).find(([key, record]) => {
+      if (normalizeSavedChatKey(key) === normalizedRequestedKey) {
+        return true;
+      }
+      if (normalizeSavedChatKey(record?.conversationKey) === normalizedRequestedKey) {
+        return true;
+      }
+      return normalizeSavedChatKey(record?.url) === normalizedRequestedKey;
+    });
+
+    return entry?.[0] || null;
+  }
+
+  function normalizeSavedChatKey(value) {
+    if (!value) {
+      return "";
+    }
+
+    let key = String(value);
+    try {
+      key = decodeURIComponent(key);
+    } catch {
+      // Keep the original value if it is not URI-encoded.
+    }
+
+    try {
+      key = new URL(key).pathname;
+    } catch {
+      // Plain storage keys like /c/... are expected.
+    }
+
+    key = key.replace(/\/$/, "") || "/";
+    return key === "/" ? "/new-chat" : key;
   }
 
   async function deleteSavedChat(conversationKey) {
-    if (!conversationKey || !state.savedChats[conversationKey]) {
+    const storageKey = resolveSavedChatKey(conversationKey);
+    if (!storageKey) {
       return;
     }
 
-    delete state.savedChats[conversationKey];
+    const record = state.savedChats[storageKey];
+    delete state.savedChats[storageKey];
 
-    if (conversationKey === state.conversationKey) {
+    if (storageKey === state.conversationKey || record?.conversationKey === state.conversationKey) {
       state.saveEnabled = false;
       await saveSavePreference();
     }
 
-    if (state.savedDetailKey === conversationKey) {
+    if (state.savedDetailKey === storageKey) {
       state.savedDetailKey = null;
     }
 

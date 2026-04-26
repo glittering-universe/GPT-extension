@@ -16,8 +16,7 @@ let savedChats = {};
 void init();
 
 async function init() {
-  const stored = await chrome.storage.local.get(SAVED_CHATS_KEY);
-  savedChats = stored[SAVED_CHATS_KEY] || {};
+  await loadSavedChats();
 
   document.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
@@ -63,6 +62,11 @@ async function init() {
   renderFromLocation();
 }
 
+async function loadSavedChats() {
+  const stored = await chrome.storage.local.get(SAVED_CHATS_KEY);
+  savedChats = stored[SAVED_CHATS_KEY] || {};
+}
+
 function renderFromLocation() {
   const key = new URLSearchParams(location.search).get("key");
   if (key) {
@@ -73,9 +77,7 @@ function renderFromLocation() {
 }
 
 function renderList() {
-  const records = Object.values(savedChats).sort(
-    (left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime()
-  );
+  const records = getSavedChatEntries();
 
   elements.title.textContent = "本地聊天记录";
   elements.meta.textContent = `${records.length} 条记录`;
@@ -94,14 +96,14 @@ function renderList() {
     <section class="saved-list">
       ${records
         .map(
-          (record) => `
+          ({ key, record }) => `
             <article class="saved-card">
-              <button type="button" class="saved-card-main" data-action="open-record" data-key="${escapeHtml(record.conversationKey)}">
+              <button type="button" class="saved-card-main" data-action="open-record" data-key="${escapeHtml(key)}">
                 <h2>${escapeHtml(record.title || "未命名记录")}</h2>
                 <p>${escapeHtml(record.snippet || "无内容预览")}</p>
                 <div class="saved-card-meta">${escapeHtml(formatSavedTime(record.updatedAt))} · ${record.messageCount || 0} 条消息</div>
               </button>
-              <button type="button" class="saved-delete" data-action="delete-record" data-key="${escapeHtml(record.conversationKey)}">删除</button>
+              <button type="button" class="saved-delete" data-action="delete-record" data-key="${escapeHtml(key)}">删除</button>
             </article>
           `
         )
@@ -110,9 +112,25 @@ function renderList() {
   `;
 }
 
-function renderRecord(key) {
-  const record = savedChats[key];
+function renderRecord(key, retryCount = 0) {
+  const entry = resolveSavedChatEntry(key);
+  const record = entry?.record;
   if (!record) {
+    if (retryCount < 6) {
+      elements.title.textContent = "正在读取本地记录";
+      elements.meta.textContent = "同步 Chrome 本地存储...";
+      elements.main.innerHTML = `
+        <section class="saved-empty">
+          <h1>正在读取这条聊天记录</h1>
+          <p>如果刚刚保存，Chrome 本地存储可能需要短暂同步。</p>
+        </section>
+      `;
+      window.setTimeout(() => {
+        void retryRenderRecord(key, retryCount + 1);
+      }, 250);
+      return;
+    }
+
     elements.title.textContent = "记录不存在";
     elements.meta.textContent = "可能已被删除";
     elements.main.innerHTML = `
@@ -125,13 +143,74 @@ function renderRecord(key) {
     return;
   }
 
+  if (entry.key !== key) {
+    history.replaceState(null, "", `saved.html?key=${encodeURIComponent(entry.key)}`);
+  }
+
   elements.title.textContent = record.title || "本地聊天记录";
   elements.meta.textContent = `${formatSavedTime(record.updatedAt)} · ${record.messageCount || 0} 条消息`;
   elements.main.innerHTML = `
     <section class="saved-thread">
-      ${(record.messages || []).map((message) => renderMessage(record.conversationKey, message)).join("")}
+      ${(record.messages || []).map((message) => renderMessage(entry.key, message)).join("")}
     </section>
   `;
+}
+
+async function retryRenderRecord(key, retryCount) {
+  await loadSavedChats();
+  renderRecord(key, retryCount);
+}
+
+function getSavedChatEntries() {
+  return Object.entries(savedChats)
+    .filter(([, record]) => record && typeof record === "object")
+    .map(([key, record]) => ({ key, record }))
+    .sort((left, right) => new Date(right.record.updatedAt).getTime() - new Date(left.record.updatedAt).getTime());
+}
+
+function resolveSavedChatEntry(requestedKey) {
+  if (!requestedKey) {
+    return null;
+  }
+
+  if (savedChats[requestedKey]) {
+    return { key: requestedKey, record: savedChats[requestedKey] };
+  }
+
+  const normalizedRequestedKey = normalizeSavedChatKey(requestedKey);
+  const entry = Object.entries(savedChats).find(([key, record]) => {
+    if (normalizeSavedChatKey(key) === normalizedRequestedKey) {
+      return true;
+    }
+    if (normalizeSavedChatKey(record?.conversationKey) === normalizedRequestedKey) {
+      return true;
+    }
+    return normalizeSavedChatKey(record?.url) === normalizedRequestedKey;
+  });
+
+  return entry ? { key: entry[0], record: entry[1] } : null;
+}
+
+function normalizeSavedChatKey(value) {
+  if (!value) {
+    return "";
+  }
+
+  let key = String(value);
+  try {
+    key = decodeURIComponent(key);
+  } catch {
+    // Keep the original value if it is not URI-encoded.
+  }
+
+  try {
+    key = new URL(key).pathname;
+  } catch {
+    // Plain storage keys like /c/... are expected.
+  }
+
+  key = key.replace(/\/$/, "") || "/";
+  return key === "/" ? "/new-chat" : key;
 }
 
 function renderMessage(conversationKey, message) {
@@ -253,7 +332,7 @@ function renderParagraphs(text) {
 }
 
 async function copyMessage(conversationKey, index, button) {
-  const record = savedChats[conversationKey];
+  const record = resolveSavedChatEntry(conversationKey)?.record;
   const message = record?.messages?.find((item) => item.index === index);
   if (!message) {
     return;
@@ -300,14 +379,18 @@ function toggleFeedback(button) {
 }
 
 async function deleteRecord(key) {
-  if (!key || !savedChats[key]) {
+  const entry = resolveSavedChatEntry(key);
+  if (!entry) {
     return;
   }
 
   const stored = await chrome.storage.local.get(SAVE_PREFS_KEY);
   const savePrefs = stored[SAVE_PREFS_KEY] || {};
-  delete savePrefs[key];
-  delete savedChats[key];
+  delete savePrefs[entry.key];
+  if (entry.record?.conversationKey) {
+    delete savePrefs[entry.record.conversationKey];
+  }
+  delete savedChats[entry.key];
   await chrome.storage.local.set({
     [SAVE_PREFS_KEY]: savePrefs,
     [SAVED_CHATS_KEY]: savedChats
