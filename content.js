@@ -20,6 +20,66 @@
     assistant: "助手",
     favorites: "收藏"
   };
+  const SNAPSHOT_STYLE_PROPS = [
+    "display",
+    "box-sizing",
+    "align-items",
+    "align-self",
+    "justify-content",
+    "justify-self",
+    "flex",
+    "flex-direction",
+    "flex-wrap",
+    "gap",
+    "row-gap",
+    "column-gap",
+    "grid-template-columns",
+    "grid-template-rows",
+    "grid-column",
+    "grid-row",
+    "margin-top",
+    "margin-right",
+    "margin-bottom",
+    "margin-left",
+    "padding-top",
+    "padding-right",
+    "padding-bottom",
+    "padding-left",
+    "border-top-width",
+    "border-right-width",
+    "border-bottom-width",
+    "border-left-width",
+    "border-top-style",
+    "border-right-style",
+    "border-bottom-style",
+    "border-left-style",
+    "border-top-color",
+    "border-right-color",
+    "border-bottom-color",
+    "border-left-color",
+    "border-radius",
+    "background-color",
+    "color",
+    "font-family",
+    "font-size",
+    "font-weight",
+    "font-style",
+    "line-height",
+    "letter-spacing",
+    "text-align",
+    "text-decoration-line",
+    "white-space",
+    "word-break",
+    "overflow-wrap",
+    "overflow-x",
+    "overflow-y",
+    "list-style-type",
+    "list-style-position",
+    "border-collapse",
+    "vertical-align",
+    "max-width",
+    "min-width"
+  ];
 
   if (window[INSTALL_FLAG]) {
     return;
@@ -620,8 +680,62 @@
 
   function extractHtml(node) {
     const clone = node.cloneNode(true);
+    inlineSnapshotStyles(node, clone);
     sanitizeMessageClone(clone);
     return clone.outerHTML || clone.innerHTML || "";
+  }
+
+  function inlineSnapshotStyles(sourceRoot, cloneRoot) {
+    applySnapshotStyle(sourceRoot, cloneRoot);
+
+    const sourceWalker = document.createTreeWalker(sourceRoot, NodeFilter.SHOW_ELEMENT);
+    const cloneWalker = document.createTreeWalker(cloneRoot, NodeFilter.SHOW_ELEMENT);
+    let sourceNode = sourceWalker.nextNode();
+    let cloneNode = cloneWalker.nextNode();
+
+    while (sourceNode && cloneNode) {
+      applySnapshotStyle(sourceNode, cloneNode);
+      sourceNode = sourceWalker.nextNode();
+      cloneNode = cloneWalker.nextNode();
+    }
+  }
+
+  function applySnapshotStyle(sourceElement, cloneElement) {
+    if (!(sourceElement instanceof Element) || !(cloneElement instanceof Element)) {
+      return;
+    }
+
+    const computed = window.getComputedStyle(sourceElement);
+    const declarations = [];
+
+    SNAPSHOT_STYLE_PROPS.forEach((property) => {
+      const value = computed.getPropertyValue(property);
+      if (!value || shouldSkipSnapshotStyle(property, value)) {
+        return;
+      }
+      declarations.push(`${property}: ${value}`);
+    });
+
+    if (declarations.length) {
+      const currentStyle = cloneElement.getAttribute("style");
+      cloneElement.setAttribute("style", [currentStyle, ...declarations].filter(Boolean).join("; "));
+    }
+  }
+
+  function shouldSkipSnapshotStyle(property, value) {
+    if (value === "normal" && ["letter-spacing", "font-style", "text-decoration-line"].includes(property)) {
+      return true;
+    }
+
+    if (property === "background-color" && ["rgba(0, 0, 0, 0)", "transparent"].includes(value)) {
+      return true;
+    }
+
+    if (property.startsWith("border") && value === "0px") {
+      return true;
+    }
+
+    return false;
   }
 
   function sanitizeMessageClone(root) {
