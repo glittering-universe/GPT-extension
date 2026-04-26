@@ -1082,7 +1082,7 @@
     if (elements.countLabel) {
       if (state.view === "saved") {
         const totalSaved = Object.keys(state.savedChats).length;
-        const visibleSaved = getFilteredSavedChats().length;
+        const visibleSaved = getFilteredSavedChatEntries().length;
         elements.countLabel.textContent = state.savedDetailKey
           ? "查看本地记录"
           : `本地记录 ${visibleSaved} / ${totalSaved}`;
