@@ -4,7 +4,8 @@
   "description": "在 ChatGPT 页面中搜索、跳转并收藏聊天消息。",
   "version": "0.1.0",
   "permissions": [
-    "storage"
+    "storage",
+    "unlimitedStorage"
   ],
   "content_scripts": [
     {

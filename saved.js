@@ -1,5 +1,6 @@
 const SAVED_CHATS_KEY = "cgptx-saved-chats";
 const SAVE_PREFS_KEY = "cgptx-save-preferences";
+const SAVED_OPEN_RECORD_KEY = "cgptx-open-saved-chat";
 const ROLE_LABELS = {
   user: "用户",
   assistant: "助手"
@@ -12,6 +13,7 @@ const elements = {
 };
 
 let savedChats = {};
+let openedRecord = null;
 
 void init();
 
@@ -63,8 +65,15 @@ async function init() {
 }
 
 async function loadSavedChats() {
-  const stored = await chrome.storage.local.get(SAVED_CHATS_KEY);
+  const stored = await chrome.storage.local.get([SAVED_CHATS_KEY, SAVED_OPEN_RECORD_KEY]);
   savedChats = stored[SAVED_CHATS_KEY] || {};
+  openedRecord = normalizeOpenedRecord(stored[SAVED_OPEN_RECORD_KEY]);
+  if (openedRecord && !savedChats[openedRecord.key]) {
+    savedChats = {
+      ...savedChats,
+      [openedRecord.key]: openedRecord.record
+    };
+  }
 }
 
 function renderFromLocation() {
@@ -116,7 +125,7 @@ function renderRecord(key, retryCount = 0) {
   const entry = resolveSavedChatEntry(key);
   const record = entry?.record;
   if (!record) {
-    if (retryCount < 6) {
+    if (retryCount < 12) {
       elements.title.textContent = "正在读取本地记录";
       elements.meta.textContent = "同步 Chrome 本地存储...";
       elements.main.innerHTML = `
@@ -177,18 +186,36 @@ function resolveSavedChatEntry(requestedKey) {
     return { key: requestedKey, record: savedChats[requestedKey] };
   }
 
+  if (openedRecord && keysMatch(openedRecord.key, requestedKey)) {
+    return openedRecord;
+  }
+
   const normalizedRequestedKey = normalizeSavedChatKey(requestedKey);
   const entry = Object.entries(savedChats).find(([key, record]) => {
-    if (normalizeSavedChatKey(key) === normalizedRequestedKey) {
+    if (keysMatch(key, normalizedRequestedKey)) {
       return true;
     }
-    if (normalizeSavedChatKey(record?.conversationKey) === normalizedRequestedKey) {
+    if (keysMatch(record?.conversationKey, normalizedRequestedKey)) {
       return true;
     }
-    return normalizeSavedChatKey(record?.url) === normalizedRequestedKey;
+    return keysMatch(record?.url, normalizedRequestedKey);
   });
 
   return entry ? { key: entry[0], record: entry[1] } : null;
+}
+
+function normalizeOpenedRecord(value) {
+  if (!value?.key || !value?.record) {
+    return null;
+  }
+  return {
+    key: String(value.key),
+    record: value.record
+  };
+}
+
+function keysMatch(left, right) {
+  return normalizeSavedChatKey(left) === normalizeSavedChatKey(right);
 }
 
 function normalizeSavedChatKey(value) {

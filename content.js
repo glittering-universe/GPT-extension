@@ -4,6 +4,7 @@
   const FAVORITES_KEY = "cgptx-favorites";
   const SAVE_PREFS_KEY = "cgptx-save-preferences";
   const SAVED_CHATS_KEY = "cgptx-saved-chats";
+  const SAVED_OPEN_RECORD_KEY = "cgptx-open-saved-chat";
   const DEFAULT_PANEL_TOP = 76;
   const DEFAULT_PANEL_RIGHT = 16;
   const DEFAULT_PANEL_WIDTH = 360;
@@ -971,9 +972,29 @@
       return;
     }
 
-    void saveSavedChats();
+    void persistSavedChatOpenRecord(storageKey);
     const url = chrome.runtime.getURL(`saved.html?key=${encodeURIComponent(storageKey)}`);
     window.open(url, "_blank", "noopener");
+  }
+
+  async function persistSavedChatOpenRecord(storageKey) {
+    const record = state.savedChats[storageKey];
+    if (!record) {
+      return;
+    }
+
+    try {
+      await storageSet({
+        [SAVED_OPEN_RECORD_KEY]: {
+          key: storageKey,
+          openedAt: new Date().toISOString(),
+          record
+        }
+      });
+      await saveSavedChats();
+    } catch (error) {
+      console.warn("[ChatGPT Sidebar Navigator] Failed to persist saved chat before opening.", error);
+    }
   }
 
   function closeSavedChatViewer() {
@@ -2101,14 +2122,28 @@
   }
 
   function storageGet(key) {
-    return new Promise((resolve) => {
-      chrome.storage.local.get(key, resolve);
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.get(key, (value) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        resolve(value);
+      });
     });
   }
 
   function storageSet(value) {
-    return new Promise((resolve) => {
-      chrome.storage.local.set(value, resolve);
+    return new Promise((resolve, reject) => {
+      chrome.storage.local.set(value, () => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          reject(new Error(error.message));
+          return;
+        }
+        resolve();
+      });
     });
   }
 })();
